@@ -1,0 +1,51 @@
+spring:
+  application:
+    name: url-shortener
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:url_shortener}
+    #url: jdbc:postgresql://localhost:5432/url_shortener
+
+    username: ${DB_USERNAME:postgres}
+    #username: postgres
+    password: ${DB_PASSWORD:postgres}
+    #password: postgres
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:20}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate.jdbc.time_zone: UTC
+      hibernate.type.preferred_instant_jdbc_type: TIMESTAMP
+  flyway:
+    enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  jackson:
+    time-zone: UTC
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+  forward-headers-strategy: framework
+management:
+  endpoints.web.exposure.include: health,info,prometheus
+  endpoint.health.probes.enabled: true
+app:
+  base-url: ${APP_BASE_URL:http://localhost:8080}
+  jwt:
+    secret: ${JWT_SECRET:change-this-256-bit-secret-before-production-123456}
+    expiration: ${JWT_EXPIRATION:PT1H}
+  cache:
+    url-ttl: ${URL_CACHE_TTL:PT30M}
+    lock-ttl: ${URL_CACHE_LOCK_TTL:PT5S}
+  
+  rate-limit:
+    per-ip-limit: 100
+    per-user-limit: 100
+    window: 60s
