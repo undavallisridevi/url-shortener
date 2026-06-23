@@ -16,47 +16,30 @@ import java.net.URI;
 @RestController
 public class RedirectController {
 
-    private final UrlService service;
-    private final RateLimiter rateLimiter;
-    private final RateLimiterProperties properties;
+	private final UrlService service;
+	private final RateLimiter rateLimiter;
+	private final RateLimiterProperties properties;
 
-    public RedirectController(
-            UrlService service,
-            RateLimiter rateLimiter,
-            RateLimiterProperties properties
-    ) {
-        this.service = service;
-        this.rateLimiter = rateLimiter;
-        this.properties = properties;
-    }
+	public RedirectController(UrlService service, RateLimiter rateLimiter, RateLimiterProperties properties) {
+		this.service = service;
+		this.rateLimiter = rateLimiter;
+		this.properties = properties;
+	}
 
-    @GetMapping("/{shortCode:[A-Za-z0-9_-]+}")
-    public ResponseEntity<Void> redirect(
-            @PathVariable String shortCode,
-            HttpServletRequest request
-    ) {
+	@GetMapping("/{shortCode:[A-Za-z0-9_-]+}")
+	public ResponseEntity<Void> redirect(@PathVariable String shortCode, HttpServletRequest request) {
 
-        String ipAddress = request.getRemoteAddr();
+		String ipAddress = request.getRemoteAddr();
 
-        RateLimitDecision decision =
-                rateLimiter.tryAcquire(
-                        RateLimitKeys.forIp(ipAddress),
-                        properties.perIpLimit(),
-                        properties.window()
-                );
+		RateLimitDecision decision = rateLimiter.tryAcquire(RateLimitKeys.forIp(ipAddress), properties.perIpLimit(),
+				properties.window());
 
-        if (!decision.allowed()) {
-            throw new TooManyRequestsException(
-                    "Rate limit exceeded. Please try again later."
-            );
-        }
+		if (!decision.allowed()) {
+			throw new TooManyRequestsException("Rate limit exceeded. Please try again later.");
+		}
 
-        String originalUrl =
-                service.resolve(shortCode);
+		String originalUrl = service.resolve(shortCode);
 
-        return ResponseEntity
-                .status(HttpStatus.FOUND)
-                .location(URI.create(originalUrl))
-                .build();
-    }
+		return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(originalUrl)).build();
+	}
 }

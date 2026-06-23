@@ -1,28 +1,45 @@
 package com.sridevi.urlshortener.service.impl;
 
-import com.sridevi.urlshortener.cache.*;
-import com.sridevi.urlshortener.dto.*;
-import com.sridevi.urlshortener.entity.*;
-import com.sridevi.urlshortener.exception.*;
-import com.sridevi.urlshortener.mapper.UrlMapper;
-import com.sridevi.urlshortener.repository.*;
-import com.sridevi.urlshortener.service.UrlService;
-import com.sridevi.urlshortener.util.Base62Encoder;
+import java.net.URI;
+import java.time.Instant;
+
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import java.net.URI;
-import java.time.Instant;
+
+import com.sridevi.urlshortener.cache.CacheLock;
+import com.sridevi.urlshortener.cache.CachedUrl;
+import com.sridevi.urlshortener.cache.UrlCache;
+import com.sridevi.urlshortener.dto.CreateUrlRequest;
+import com.sridevi.urlshortener.dto.UrlResponse;
+import com.sridevi.urlshortener.dto.UrlStatsResponse;
+import com.sridevi.urlshortener.entity.Url;
+import com.sridevi.urlshortener.entity.User;
+import com.sridevi.urlshortener.exception.BadRequestException;
+import com.sridevi.urlshortener.exception.ConflictException;
+import com.sridevi.urlshortener.exception.ExpiredUrlException;
+import com.sridevi.urlshortener.exception.ForbiddenException;
+import com.sridevi.urlshortener.exception.ResourceNotFoundException;
+import com.sridevi.urlshortener.kafka.event.UrlClickedEvent;
+import com.sridevi.urlshortener.kafka.producer.AnalyticsEventProducer;
+import com.sridevi.urlshortener.mapper.UrlMapper;
+import com.sridevi.urlshortener.repository.AnalyticsSummaryRepository;
+import com.sridevi.urlshortener.repository.UrlRepository;
+import com.sridevi.urlshortener.repository.UserRepository;
+import com.sridevi.urlshortener.service.UrlService;
+import com.sridevi.urlshortener.util.Base62Encoder;
 
 @Service
 public class UrlServiceImpl implements UrlService {
     private final UrlRepository urls; private final UserRepository users; private final Base62Encoder encoder;
     private final UrlMapper mapper; private final UrlCache cache; private final CacheLock cacheLock;
     private final AnalyticsSummaryRepository analytics;
+    private final AnalyticsEventProducer analyticsProducer;
     public UrlServiceImpl(UrlRepository urls, UserRepository users, Base62Encoder encoder, UrlMapper mapper,
-                          UrlCache cache, CacheLock cacheLock, AnalyticsSummaryRepository analytics) {
+                          UrlCache cache, CacheLock cacheLock, AnalyticsSummaryRepository analytics, AnalyticsEventProducer analyticsProducer) {
         this.urls = urls; this.users = users; this.encoder = encoder; this.mapper = mapper;
         this.cache = cache; this.cacheLock = cacheLock; this.analytics = analytics;
+		this.analyticsProducer = analyticsProducer;
     }
     @Override @Transactional
     public UrlResponse create(CreateUrlRequest request, String username) {
@@ -37,22 +54,83 @@ public class UrlServiceImpl implements UrlService {
         try { return mapper.toResponse(urls.saveAndFlush(url)); }
         catch (DataIntegrityViolationException ex) { throw new ConflictException("Short code is already in use"); }
     }
-    @Override @Transactional(readOnly = true)
+    @Override
+    @Transactional(readOnly = true)
     public String resolve(String shortCode) {
+
         CachedUrl cached = cache.get(shortCode).orElse(null);
-        if (cached != null) { ensureNotExpired(cached.expiresAt()); return cached.originalUrl(); }
+
+        if (cached != null) {
+
+            ensureNotExpired(cached.expiresAt());
+
+            analyticsProducer.publish(
+                    new UrlClickedEvent(
+                            shortCode,
+                            Instant.now(),
+                            null,
+                            null
+                    )
+            );
+
+            return cached.originalUrl();
+        }
+
         String lockToken = cacheLock.tryLock(shortCode).orElse(null);
+
         try {
+
             if (lockToken != null) {
+
                 CachedUrl afterLock = cache.get(shortCode).orElse(null);
-                if (afterLock != null) { ensureNotExpired(afterLock.expiresAt()); return afterLock.originalUrl(); }
+
+                if (afterLock != null) {
+
+                    ensureNotExpired(afterLock.expiresAt());
+
+                    analyticsProducer.publish(
+                            new UrlClickedEvent(
+                                    shortCode,
+                                    Instant.now(),
+                                    null,
+                                    null
+                            )
+                    );
+
+                    return afterLock.originalUrl();
+                }
             }
-            Url url = urls.findByShortCodeAndDeletedFalse(shortCode).orElseThrow(() -> new ResourceNotFoundException("Short URL not found"));
+
+            Url url = urls.findByShortCodeAndDeletedFalse(shortCode)
+                    .orElseThrow(() ->
+                            new ResourceNotFoundException("Short URL not found"));
+
             ensureNotExpired(url.getExpiresAt());
-            cache.put(shortCode, new CachedUrl(url.getOriginalUrl(), url.getExpiresAt()));
+
+            cache.put(
+                    shortCode,
+                    new CachedUrl(
+                            url.getOriginalUrl(),
+                            url.getExpiresAt()
+                    )
+            );
+
+            analyticsProducer.publish(
+                    new UrlClickedEvent(
+                            shortCode,
+                            Instant.now(),
+                            null,
+                            null
+                    )
+            );
+
             return url.getOriginalUrl();
+
         } finally {
-            if (lockToken != null) cacheLock.unlock(shortCode, lockToken);
+
+            if (lockToken != null) {
+                cacheLock.unlock(shortCode, lockToken);
+            }
         }
     }
     @Override @Transactional(readOnly = true)
