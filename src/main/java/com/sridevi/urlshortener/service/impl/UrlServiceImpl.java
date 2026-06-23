@@ -2,17 +2,23 @@ package com.sridevi.urlshortener.service.impl;
 
 import java.net.URI;
 import java.time.Instant;
+import java.util.List;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.sridevi.urlshortener.cache.CacheLock;
 import com.sridevi.urlshortener.cache.CachedUrl;
 import com.sridevi.urlshortener.cache.UrlCache;
+import com.sridevi.urlshortener.dto.AnalyticsResponse;
 import com.sridevi.urlshortener.dto.CreateUrlRequest;
+import com.sridevi.urlshortener.dto.DailyClickResponse;
+import com.sridevi.urlshortener.dto.TopUrlResponse;
 import com.sridevi.urlshortener.dto.UrlResponse;
 import com.sridevi.urlshortener.dto.UrlStatsResponse;
+import com.sridevi.urlshortener.dto.UserUrlResponse;
 import com.sridevi.urlshortener.entity.Url;
 import com.sridevi.urlshortener.entity.User;
 import com.sridevi.urlshortener.exception.BadRequestException;
@@ -24,6 +30,7 @@ import com.sridevi.urlshortener.kafka.event.UrlClickedEvent;
 import com.sridevi.urlshortener.kafka.producer.AnalyticsEventProducer;
 import com.sridevi.urlshortener.mapper.UrlMapper;
 import com.sridevi.urlshortener.repository.AnalyticsSummaryRepository;
+import com.sridevi.urlshortener.repository.DailyClickRepository;
 import com.sridevi.urlshortener.repository.UrlRepository;
 import com.sridevi.urlshortener.repository.UserRepository;
 import com.sridevi.urlshortener.service.UrlService;
@@ -35,11 +42,14 @@ public class UrlServiceImpl implements UrlService {
     private final UrlMapper mapper; private final UrlCache cache; private final CacheLock cacheLock;
     private final AnalyticsSummaryRepository analytics;
     private final AnalyticsEventProducer analyticsProducer;
+    private final DailyClickRepository dailyClicks;
     public UrlServiceImpl(UrlRepository urls, UserRepository users, Base62Encoder encoder, UrlMapper mapper,
-                          UrlCache cache, CacheLock cacheLock, AnalyticsSummaryRepository analytics, AnalyticsEventProducer analyticsProducer) {
+                          UrlCache cache, CacheLock cacheLock, AnalyticsSummaryRepository analytics,DailyClickRepository dailyClicks, AnalyticsEventProducer analyticsProducer
+                          ) {
         this.urls = urls; this.users = users; this.encoder = encoder; this.mapper = mapper;
         this.cache = cache; this.cacheLock = cacheLock; this.analytics = analytics;
 		this.analyticsProducer = analyticsProducer;
+		this.dailyClicks = dailyClicks;
     }
     @Override @Transactional
     public UrlResponse create(CreateUrlRequest request, String username) {
@@ -152,5 +162,81 @@ public class UrlServiceImpl implements UrlService {
     private void validateUrl(String value) {
         try { URI uri = URI.create(value); if (uri.getHost() == null || !("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))) throw new IllegalArgumentException(); }
         catch (IllegalArgumentException ex) { throw new BadRequestException("originalUrl must be a valid absolute HTTP(S) URL"); }
+    }
+    @Override
+    @Transactional(readOnly = true)
+    public List<UserUrlResponse> getMyUrls(String username) {
+
+        return urls.findByUserUsernameAndDeletedFalse(username)
+                .stream()
+                .map(url -> new UserUrlResponse(
+                        url.getShortCode(),
+                        "http://localhost:8080/" + url.getShortCode(),
+                        url.getOriginalUrl()
+                ))
+                .toList();
+    }
+    
+    @Override
+    @Transactional(readOnly = true)
+    public AnalyticsResponse analytics(
+            String shortCode,
+            String username
+    ) {
+
+        Url url =
+                urls.findOwnedActiveUrl(shortCode)
+                        .orElseThrow(() ->
+                                new ResourceNotFoundException(
+                                        "Short URL not found"
+                                ));
+
+        if (!url.getUser().getUsername().equals(username)) {
+            throw new ForbiddenException(
+                    "You do not own this short URL"
+            );
+        }
+
+        var summary =
+                analytics.findById(shortCode)
+                        .orElse(null);
+
+        var daily =
+                dailyClicks
+                        .findByShortCodeOrderByClickDateAsc(
+                                shortCode
+                        )
+                        .stream()
+                        .map(d ->
+                                new DailyClickResponse(
+                                        d.getClickDate(),
+                                        d.getClickCount()
+                                ))
+                        .toList();
+
+        return new AnalyticsResponse(
+                shortCode,
+                summary == null ? 0 : summary.getTotalClicks(),
+                summary == null ? null : summary.getLastClickedAt(),
+                daily
+        );
+    }
+    
+    @Override
+    @Transactional(readOnly = true)
+    public List<TopUrlResponse> topUrls() {
+
+        return analytics
+                .findAllByOrderByTotalClicksDesc(
+                        PageRequest.of(0, 10)
+                )
+                .stream()
+                .map(a ->
+                        new TopUrlResponse(
+                                a.getShortCode(),
+                                a.getTotalClicks()
+                        )
+                )
+                .toList();
     }
 }

@@ -34,6 +34,7 @@ import com.sridevi.urlshortener.exception.ForbiddenException;
 import com.sridevi.urlshortener.kafka.producer.AnalyticsEventProducer;
 import com.sridevi.urlshortener.mapper.UrlMapper;
 import com.sridevi.urlshortener.repository.AnalyticsSummaryRepository;
+import com.sridevi.urlshortener.repository.DailyClickRepository;
 import com.sridevi.urlshortener.repository.UrlRepository;
 import com.sridevi.urlshortener.repository.UserRepository;
 import com.sridevi.urlshortener.util.Base62Encoder;
@@ -43,7 +44,11 @@ class UrlServiceImplTest {
     @Mock UrlRepository urls; @Mock UserRepository users; @Mock UrlCache cache; @Mock CacheLock cacheLock;
     @Mock AnalyticsSummaryRepository analytics;
     @Mock AnalyticsEventProducer analyticsProducer;
+    @Mock
+     DailyClickRepository dailyClickRepository;
+    
     UrlServiceImpl service;
+    
     @BeforeEach
     void setUp() {
 
@@ -58,7 +63,7 @@ class UrlServiceImplTest {
                 cache,
                 cacheLock,
                 analytics,
-                analyticsProducer
+                dailyClickRepository, analyticsProducer
         );
     }
     

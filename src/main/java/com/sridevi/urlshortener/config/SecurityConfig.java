@@ -17,17 +17,26 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @Configuration
 @EnableConfigurationProperties(JwtProperties.class)
 public class SecurityConfig {
-    @Bean SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthenticationFilter jwtFilter) throws Exception {
-        return http.csrf(csrf -> csrf.disable())
-                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/v1/auth/**", "/actuator/health/**", "/error").permitAll()
-                        .requestMatchers("/api/v1/urls/**").authenticated()
-                        .requestMatchers(HttpMethod.GET, "/*").permitAll()
-                        .anyRequest().denyAll())
-                .exceptionHandling(e -> e.authenticationEntryPoint((req, res, ex) -> res.sendError(HttpServletResponse.SC_UNAUTHORIZED)))
-                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class).build();
-    }
-    @Bean PasswordEncoder passwordEncoder() { return new BCryptPasswordEncoder(12); }
-    @Bean AuthenticationManager authenticationManager(AuthenticationConfiguration configuration) throws Exception { return configuration.getAuthenticationManager(); }
+	@Bean
+	SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthenticationFilter jwtFilter) throws Exception {
+		return http.csrf(csrf -> csrf.disable())
+				.sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+				.authorizeHttpRequests(auth -> auth.requestMatchers("/api/v1/auth/**", "/actuator/health/**", "/error").permitAll()
+						.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+						.requestMatchers("/api/v1/urls/**").authenticated()
+						.requestMatchers(HttpMethod.GET, "/*").permitAll().anyRequest().denyAll())
+				.exceptionHandling(e -> e
+						.authenticationEntryPoint((req, res, ex) -> res.sendError(HttpServletResponse.SC_UNAUTHORIZED)))
+				.addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class).build();
+	}
+
+	@Bean
+	PasswordEncoder passwordEncoder() {
+		return new BCryptPasswordEncoder(12);
+	}
+
+	@Bean
+	AuthenticationManager authenticationManager(AuthenticationConfiguration configuration) throws Exception {
+		return configuration.getAuthenticationManager();
+	}
 }

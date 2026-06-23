@@ -1,6 +1,15 @@
 package com.sridevi.urlshortener.repository;
 
-import com.sridevi.urlshortener.entity.*;
+import com.sridevi.urlshortener.entity.DailyClick;
+import com.sridevi.urlshortener.entity.DailyClickId;
 import org.springframework.data.jpa.repository.JpaRepository;
 
-public interface DailyClickRepository extends JpaRepository<DailyClick, DailyClickId> {}
+import java.util.List;
+
+public interface DailyClickRepository
+        extends JpaRepository<DailyClick, DailyClickId> {
+
+    List<DailyClick> findByShortCodeOrderByClickDateAsc(
+            String shortCode
+    );
+}
