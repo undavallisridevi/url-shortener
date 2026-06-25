@@ -1,30 +1,327 @@
-# URL Shortener
+# 🚀 URL Shortener — Production-Style Backend System
 
-Spring Boot 3.5 / Java 21 URL shortening service with PostgreSQL persistence, Redis cache-aside redirects, JWT authentication, Flyway migrations, and Docker Compose.
+A production-style URL Shortener built using **Java 17, Spring Boot 3, PostgreSQL, Redis, Kafka, Flyway, Docker and JWT Authentication**.
 
-## Architecture notes
+Instead of implementing only CRUD operations, this project focuses on backend engineering concepts commonly used in modern distributed systems such as caching, asynchronous messaging, rate limiting, and analytics aggregation.
 
-- URL IDs come from PostgreSQL sequence `url_id_seq` before the single URL insert and are Base62 encoded.
-- Redis keys use `url:{shortCode}`. A short-lived `lock:url:{shortCode}` lock with token-safe Lua release reduces cache stampedes.
-- PostgreSQL remains the source of truth. Soft-deleted aliases are retained and cannot be reused.
-- Kafka producer/consumer and the Redis sliding-window rate limiter are contracts only, per the current implementation scope. Their event and key designs follow the project specification but are not wired into requests yet.
-- The future rate limiter contract reserves `rate:ip:{ipAddress}` and `rate:user:{userId}` keys for a 100-request/60-second Redis ZSET Lua implementation.
-- Kafka runs in modern KRaft mode in Compose, so a ZooKeeper container is intentionally unnecessary.
-- Repository integration coverage uses Testcontainers and automatically skips only when Docker is unavailable. GitHub Actions runs the Java 21 Maven verification pipeline.
+---
 
-## Run
+# ✨ Features
 
-Set a production-strength JWT secret and start the stack:
+## Authentication
 
-```powershell
-$env:JWT_SECRET = "replace-with-at-least-32-random-bytes"
-docker compose up --build
+* JWT Authentication
+* User Registration
+* User Login
+* Protected APIs
+* BCrypt Password Encryption
+
+---
+
+## URL Management
+
+* Create Short URLs
+* Custom Alias Support
+* Expiration Support
+* Soft Delete
+* User-owned URLs
+* Base62 Encoding
+
+---
+
+## Performance
+
+* Redis Cache
+* Cache-Aside Pattern
+* Cache Stampede Protection
+* Sliding Window Rate Limiter
+
+---
+
+## Analytics
+
+* Kafka Event Publishing
+* Asynchronous Analytics Processing
+* Total Click Tracking
+* Daily Click Aggregation
+* Top URLs API
+
+---
+
+# 🏗️ System Architecture
+
+```text
+                                Client
+                                   │
+                                   ▼
+                     ┌────────────────────────┐
+                     │ Spring Boot REST APIs  │
+                     └────────────┬───────────┘
+                                  │
+             ┌────────────────────┼────────────────────┐
+             │                    │                    │
+             ▼                    ▼                    ▼
+      JWT Authentication     Redis Cache        PostgreSQL
+             │             (Cache Aside)      (Source of Truth)
+             │                    │
+             │                    ▼
+             │             Cache Miss ?
+             │                    │
+             │           ┌────────┴────────┐
+             │           │                 │
+             │         Cache Hit       Database Read
+             │           │                 │
+             │           └────────┬────────┘
+             │                    ▼
+             │             Return Original URL
+             │                    │
+             ▼                    ▼
+        Redirect (HTTP 302)   Kafka Producer
+                                   │
+                                   ▼
+                            analytics-events
+                                   │
+                                   ▼
+                           Kafka Consumer
+                                   │
+                                   ▼
+                          Analytics Service
+                                   │
+                    ┌──────────────┴──────────────┐
+                    ▼                             ▼
+            analytics_summary              daily_clicks
 ```
 
-The API listens on `http://localhost:8080`. Register or log in under `/api/v1/auth`, then pass `Authorization: Bearer <token>` to URL creation, statistics, and deletion endpoints.
+---
 
-Create request example:
+# 🔄 Redirect Flow
 
-```json
-{"url":"https://amazon.com","customAlias":null,"expiryDays":30}
+```text
+Browser
+   │
+   ▼
+GET /Q0v
+   │
+   ▼
+Rate Limiter
+   │
+   ▼
+Redis Cache
+   │
+   ├────────────► Cache Hit
+   │                 │
+   │                 ▼
+   │            Publish Kafka Event
+   │                 │
+   │                 ▼
+   │            HTTP 302 Redirect
+   │
+   ▼
+Cache Miss
+   │
+   ▼
+Acquire Redis Lock
+   │
+   ▼
+Read PostgreSQL
+   │
+   ▼
+Populate Redis Cache
+   │
+   ▼
+Publish Kafka Event
+   │
+   ▼
+HTTP 302 Redirect
 ```
+
+---
+
+# 📦 Tech Stack
+
+| Category         | Technology                       |
+| ---------------- | -------------------------------- |
+| Language         | Java 17                          |
+| Framework        | Spring Boot 3                    |
+| Security         | Spring Security + JWT            |
+| ORM              | Spring Data JPA                  |
+| Database         | PostgreSQL                       |
+| Cache            | Redis                            |
+| Messaging        | Apache Kafka                     |
+| Migration        | Flyway                           |
+| Build Tool       | Maven                            |
+| Testing          | JUnit 5, Mockito, Testcontainers |
+| Containerization | Docker, Docker Compose           |
+
+---
+
+# 📊 Database Schema
+
+### users
+
+Stores registered users.
+
+### urls
+
+Stores:
+
+* Original URL
+* Short Code
+* Owner
+* Expiry
+* Soft Delete
+
+### analytics_summary
+
+Stores:
+
+* Total Clicks
+* Last Click Timestamp
+
+### daily_clicks
+
+Stores aggregated click counts per day.
+
+---
+
+# ⚡ Redis Keys
+
+| Key                    | Purpose                     |
+| ---------------------- | --------------------------- |
+| `url:{shortCode}`      | URL Cache                   |
+| `lock:url:{shortCode}` | Cache Stampede Lock         |
+| `rate:ip:{ip}`         | Sliding Window Rate Limiter |
+
+---
+
+# 📡 Kafka Flow
+
+Every successful redirect publishes a lightweight event.
+
+Producer:
+
+```
+RedirectController
+        │
+        ▼
+AnalyticsEventProducer
+        │
+        ▼
+analytics-events
+```
+
+Consumer:
+
+```
+analytics-events
+        │
+        ▼
+AnalyticsEventConsumer
+        │
+        ▼
+AnalyticsService
+        │
+        ▼
+analytics_summary
+daily_clicks
+```
+
+This ensures redirect latency remains low while analytics are processed asynchronously.
+
+---
+
+# 🔐 Security
+
+* JWT Authentication
+* Stateless Sessions
+* BCrypt Password Hashing
+* Protected REST APIs
+* Public Redirect Endpoint
+
+---
+
+# 🧪 Testing
+
+The project includes:
+
+* Unit Tests
+* Service Layer Tests
+* Repository Integration Tests
+* Testcontainers-based PostgreSQL Tests
+
+---
+
+# 🚀 Running the Project
+
+```bash
+docker compose up -d
+
+mvn clean install
+
+mvn spring-boot:run
+```
+
+---
+
+# 📚 API Endpoints
+
+### Authentication
+
+```
+POST /api/v1/auth/register
+POST /api/v1/auth/login
+```
+
+### URL Management
+
+```
+POST /api/v1/urls
+GET /api/v1/urls
+DELETE /api/v1/urls/{shortCode}
+```
+
+### Redirect
+
+```
+GET /{shortCode}
+```
+
+### Analytics
+
+```
+GET /api/v1/urls/{shortCode}/stats
+GET /api/v1/urls/{shortCode}/analytics
+GET /api/v1/urls/top
+```
+
+---
+
+# 💡 Backend Concepts Demonstrated
+
+* JWT Authentication
+* Cache-Aside Pattern
+* Cache Stampede Prevention
+* Sliding Window Rate Limiting
+* Event-Driven Architecture
+* Asynchronous Processing
+* Repository Pattern
+* Service Layer Architecture
+* Soft Deletes
+* Dockerized Local Development
+
+---
+
+# 🔮 Future Enhancements
+
+* Geo-location Analytics
+* QR Code Generation
+* Custom Domains
+* Redis Cluster
+* Kafka Multi-Broker Deployment
+* Prometheus & Grafana Monitoring
+
+---
+
+# 📄 License
+
+This project is intended for learning, portfolio demonstration, and backend engineering interview preparation.
